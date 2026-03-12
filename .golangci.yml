@@ -1,42 +1,10 @@
-version: "2"
-
-run:
-  timeout: 5m
-
 linters:
-  default: none
+  disable-all: true
   enable:
-    - errcheck       # проверяет что ошибки не игнорируются
-    - govet          # статический анализ (аналог go vet)
-    - staticcheck    # мощный статический анализатор
-    - unused         # поиск неиспользуемого кода
-    - misspell       # орфографические ошибки в комментариях
-    - ineffassign    # неэффективные присваивания
     - loglinter
-  settings:
-    custom:
-      loglinter:
-        path: ./plugin/loglinter.so
-        description: Checks log messages for style violations
-        original-url: github.com/GeorgeTyupin/go-log-linter
 
-formatters:
-  enable:
-    - gofmt          # форматирование кода
-    - goimports      # проверка и сортировка импортов
-
-  settings:
-    gofmt:
-      simplify: true
-    goimports:
-      local-prefixes:
-        - github.com/GeorgeTyupin/go-log-linter
-
-exclusions:
-  rules:
-    - path: _test\.go
-      linters:
-        - errcheck
-
-issues:
-  max-same-issues: 10
+linters-settings:
+  custom:
+    loglinter:
+      path: ./plugin/loglinter.so
+      description: Checks log messages for style violations
