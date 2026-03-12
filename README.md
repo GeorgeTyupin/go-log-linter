@@ -13,34 +13,41 @@
 
 Поддерживаемые логгеры: `log`, `log/slog`, `go.uber.org/zap`.
 
-## Сборка
+## Сборка и запуск
 
+### 1. Как плагин для golangci-lint (Рекомендуется)
+
+Сначала соберите плагин:
 ```bash
 go build -buildmode=plugin -o plugin/loglinter.so plugin/plugin.go
 ```
 
-## Интеграция с golangci-lint
+Запуск проверки:
+```bash
+golangci-lint run ./testdata/sample.go
+```
+*Примечание: Ваш `golangci-lint` должен быть собран той же версией Go, что и плагин. Если они не совпадают, используйте `go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.0`.*
 
-Добавить в `.golangci.yml`:
-
+#### Настройка .golangci.yml
+Линтер уже настроен в проекте, но для справки — вот что добавлено в `.golangci.yml`:
 ```yaml
 linters:
-  settings:
-    custom:
-      loglinter:
-        path: ./plugin/loglinter.so
-        description: Checks log messages for style violations
-        original-url: github.com/GeorgeTyupin/go-log-linter
+  enable:
+    - loglinter
+  custom:
+    loglinter:
+      path: ./plugin/loglinter.so
+      description: Checks log messages for style violations
 ```
 
-## Запуск без golangci-lint
-
+### 2. Без golangci-lint
+Запуск напрямую через `go run`:
 ```bash
-go run ./cmd/linter ./...
+go run ./cmd/linter ./testdata/
 ```
+*(Мы указываем путь `./testdata/` явно. Вы можете указать любой другой путь с нуждающимися в проверке файлами)*
 
 ## Тесты
-
 ```bash
 go test ./...
 ```
