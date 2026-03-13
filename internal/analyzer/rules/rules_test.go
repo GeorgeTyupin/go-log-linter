@@ -96,9 +96,33 @@ func TestCheckNoSensitiveData(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, violated := rules.CheckNoSensitiveData(tt.msg)
+			_, violated := rules.CheckNoSensitiveData(tt.msg, nil)
 			if violated != tt.wantErr {
 				t.Errorf("CheckNoSensitiveData(%q) violated=%v, want %v", tt.msg, violated, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestCheckNoSensitiveDataCustomPatterns(t *testing.T) {
+	extra := []string{"mytoken", "internalkey"}
+
+	tests := []struct {
+		name    string
+		msg     string
+		wantErr bool
+	}{
+		{"custom pattern match", "mytoken=abc123", true},
+		{"custom pattern case-insensitive", "INTERNALKEY found", true},
+		{"no match without extra", "mytoken data", true},
+		{"safe without custom", "user logged in", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, violated := rules.CheckNoSensitiveData(tt.msg, extra)
+			if violated != tt.wantErr {
+				t.Errorf("CheckNoSensitiveData(%q, extra) violated=%v, want %v", tt.msg, violated, tt.wantErr)
 			}
 		})
 	}

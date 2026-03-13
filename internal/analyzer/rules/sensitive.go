@@ -20,15 +20,26 @@ var substringKeywords = []string{
 	"client_secret",
 }
 
-func CheckNoSensitiveData(msg string) (string, bool) {
+// CheckNoSensitiveData проверяет сообщение на наличие чувствительных данных.
+func CheckNoSensitiveData(msg string, extraPatterns []string) (string, bool) {
 	lower := strings.ToLower(msg)
 
+	// Проверяем встроенные substring-паттерны
 	for _, keyword := range substringKeywords {
 		if strings.Contains(lower, keyword) {
 			return fmt.Sprintf("log message may contain sensitive data (keyword: %q)", keyword), true
 		}
 	}
 
+	// Проверяем кастомные паттерны как подстроки
+	for _, pattern := range extraPatterns {
+		p := strings.ToLower(strings.TrimSpace(pattern))
+		if p != "" && strings.Contains(lower, p) {
+			return fmt.Sprintf("log message may contain sensitive data (custom pattern: %q)", p), true
+		}
+	}
+
+	// Разбиваем на слова и ищем точные совпадения со встроенными exact-словами
 	words := strings.FieldsFunc(lower, func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 	})
