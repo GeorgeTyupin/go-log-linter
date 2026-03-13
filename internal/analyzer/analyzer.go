@@ -5,19 +5,25 @@ import (
 	"go/token"
 	"go/types"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/inspect"
 	"golang.org/x/tools/go/ast/inspector"
 
 	"github.com/GeorgeTyupin/go-log-linter/internal/analyzer/rules"
+	"github.com/GeorgeTyupin/go-log-linter/internal/config"
 )
 
-var Analyzer = &analysis.Analyzer{
-	Name:     "loglinter",
-	Doc:      "Checks log messages for style violations",
-	Run:      run,
-	Requires: []*analysis.Analyzer{inspect.Analyzer},
+func NewAnalyzer(cfg *config.Config) *analysis.Analyzer {
+	Analyzer := &analysis.Analyzer{
+		Name:     "loglinter",
+		Doc:      "Checks log messages for style violations",
+		Run:      newRun(cfg),
+		Requires: []*analysis.Analyzer{inspect.Analyzer},
+	}
+	return Analyzer
 }
 
 var logMethods = map[string]bool{
@@ -32,62 +38,148 @@ var logPackages = map[string]bool{
 	"go.uber.org/zap": true,
 }
 
-func run(pass *analysis.Pass) (interface{}, error) {
-	insp := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
+func newRun(cfg *config.Config) func(pass *analysis.Pass) (interface{}, error) {
+	return func(pass *analysis.Pass) (interface{}, error) {
+		insp := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
 
-	nodeFilter := []ast.Node{(*ast.CallExpr)(nil)}
-
-	insp.Preorder(nodeFilter, func(n ast.Node) {
-		callExpr, ok := n.(*ast.CallExpr)
-		if !ok {
-			return
-		}
-
-		msg, pos, ok := extractLogMessage(pass, callExpr)
-		if !ok {
-			return
-		}
-
-		for _, check := range []func(string) (string, bool){
-			rules.CheckLowercase,
-			rules.CheckEnglishOnly,
-			rules.CheckNoSpecialChars,
-			rules.CheckNoSensitiveData,
-		} {
-			if diagnostic, violated := check(msg); violated {
-				pass.Reportf(pos, "%s", diagnostic)
+		// Разбиваем кастомные паттерны из флага или конфига
+		var extraPatterns []string
+		if cfg.ExtraSensitivePatterns != "" {
+			for _, p := range strings.Split(cfg.ExtraSensitivePatterns, ",") {
+				p = strings.TrimSpace(p)
+				if p != "" {
+					extraPatterns = append(extraPatterns, p)
+				}
 			}
 		}
-	})
 
-	return nil, nil
+		nodeFilter := []ast.Node{(*ast.CallExpr)(nil)}
+
+		insp.Preorder(nodeFilter, func(n ast.Node) {
+			callExpr, ok := n.(*ast.CallExpr)
+			if !ok {
+				return
+			}
+
+			msg, lit, ok := extractLogMessage(pass, callExpr)
+			if !ok {
+				return
+			}
+
+			// 1. Проверка на секреты (Приоритет: прерываем остальные проверки)
+			if !cfg.DisableNoSensitiveData {
+				if diagnostic, violated := rules.CheckNoSensitiveData(msg, extraPatterns); violated {
+					pass.Reportf(lit.Pos(), "%s", diagnostic)
+					return
+				}
+			}
+
+			// 2. Проверка на строчные буквы
+			if !cfg.DisableLowercase {
+				if diagnostic, violated := rules.CheckLowercase(msg); violated {
+					pass.Report(analysis.Diagnostic{
+						Pos:     lit.Pos(),
+						Message: diagnostic,
+						SuggestedFixes: []analysis.SuggestedFix{
+							{
+								Message: "convert first letter to lowercase",
+								TextEdits: []analysis.TextEdit{
+									{
+										// Заменяем первый символ внутри кавычек на строчный.
+										// lit.Pos() указывает на открывающую кавычку, поэтому +1.
+										Pos:     lit.Pos() + 1,
+										End:     lit.Pos() + 1 + token.Pos(utf8.RuneLen([]rune(msg)[0])),
+										NewText: []byte(string(unicode.ToLower([]rune(msg)[0]))),
+									},
+								},
+							},
+						},
+					})
+				}
+			}
+
+			// 3. Проверка на английский язык
+			if !cfg.DisableEnglishOnly {
+				if diagnostic, violated := rules.CheckEnglishOnly(msg); violated {
+					pass.Reportf(lit.Pos(), "%s", diagnostic)
+				}
+			}
+
+			// 4. Проверка на спецсимволы
+			if !cfg.DisableNoSpecialChars {
+				if diagnostic, violated := rules.CheckNoSpecialChars(msg); violated {
+					pass.Report(analysis.Diagnostic{
+						Pos:     lit.Pos(),
+						Message: diagnostic,
+						SuggestedFixes: []analysis.SuggestedFix{
+							{
+								Message: "remove special characters and emojis",
+								TextEdits: []analysis.TextEdit{
+									{
+										Pos:     lit.Pos() + 1,
+										End:     lit.End() - 1,
+										NewText: []byte(sanitizeMessage(msg)),
+									},
+								},
+							},
+						},
+					})
+				}
+			}
+
+		})
+
+		return nil, nil
+	}
 }
 
-func extractLogMessage(pass *analysis.Pass, call *ast.CallExpr) (string, token.Pos, bool) {
+// sanitizeMessage удаляет из сообщения все недопустимые символы (спецсимволы и эмодзи).
+func sanitizeMessage(msg string) string {
+	var b strings.Builder
+	for _, r := range msg {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || isAllowedPunct(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+var allowedPunct = map[rune]bool{
+	' ': true, '-': true, '_': true, '/': true,
+	',': true, ':': true,
+	'(': true, ')': true, '[': true, ']': true,
+	'\'': true,
+}
+
+func isAllowedPunct(r rune) bool {
+	return allowedPunct[r]
+}
+
+func extractLogMessage(pass *analysis.Pass, call *ast.CallExpr) (string, *ast.BasicLit, bool) {
 	if len(call.Args) == 0 {
-		return "", 0, false
+		return "", nil, false
 	}
 
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok {
-		return "", 0, false
+		return "", nil, false
 	}
 
 	if !logMethods[sel.Sel.Name] {
-		return "", 0, false
+		return "", nil, false
 	}
 
 	if !isLoggerCall(pass, sel) {
-		return "", 0, false
+		return "", nil, false
 	}
 
 	lit, ok := call.Args[0].(*ast.BasicLit)
 	if !ok || lit.Kind != token.STRING {
-		return "", 0, false
+		return "", nil, false
 	}
 
 	msg := strings.Trim(lit.Value, `"`+"`")
-	return msg, lit.Pos(), true
+	return msg, lit, true
 }
 
 func isLoggerCall(pass *analysis.Pass, sel *ast.SelectorExpr) bool {

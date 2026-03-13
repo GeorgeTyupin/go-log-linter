@@ -1,0 +1,12 @@
+disable-lowercase: false # Проверка на строчные буквы. Поставьте true чтобы отключить проверку.
+disable-english-only: false # Проверка на английский язык. Поставьте true чтобы отключить проверку.
+disable-no-special-chars: false # Проверка на спецсимволы. Поставьте true чтобы отключить проверку.
+disable-no-sensitive-data: false # Проверка на чувствительные данные. Поставьте true чтобы отключить проверку.
+extra-sensitive-patterns: "" # Добавьте сюда свои паттерны через запятую без пробелов.
+
+# Пример использования:
+# disable-lowercase: false
+# disable-english-only: true
+# disable-no-special-chars: true
+# disable-no-sensitive-data: false
+# extra-sensitive-patterns: "mytoken,cvv"

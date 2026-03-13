@@ -1,6 +1,5 @@
 *.pdf
 *.so
-.*
 
 !.golangci.yml
 !.gitignore
